@@ -1,0 +1,16 @@
+# Web Framework & Server
+fastapi>=0.110.0    # frontend framework
+uvicorn[standard]>=0.27.0  # supporting server for FastAPI
+python-multipart>=0.0.9  # this is the library, helping to form data and upload files from users
+
+# Database (SQLAlchemy for SQLite)
+sqlalchemy>=2.0.0  #sqllite database and Object Relational Mapping
+
+# Machine Learning & Data Processing
+pandas>=2.0.0  # data manipulation
+numpy>=1.24.0  # handle numerical data
+scikit-learn>=1.4.0   #scientific kit learning for machine learning
+
+# Environment & Security
+python-dotenv>=1.0.0  # environment setup 
+corsheaders>=4.3.0  #for cross origin resource sharing (security while communicating )
