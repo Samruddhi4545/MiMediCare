@@ -13,4 +13,3 @@ scikit-learn>=1.4.0   #scientific kit learning for machine learning
 
 # Environment & Security
 python-dotenv>=1.0.0  # environment setup 
-corsheaders>=4.3.0  #for cross origin resource sharing (security while communicating )
