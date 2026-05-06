@@ -10,7 +10,7 @@ import io
 # symptom_model = tf.keras.models.load_model('models/symptom_model.h5')
 
 # 2. Load Pill Detection Model (Notebook #02)
-pill_model = YOLO('models/pill_model.pt')
+pill_model = YOLO('Backend/models/pill_model.pt')
 
 # 3. Load X-ray Model (Notebook #03)
 # We load the architecture then the saved weights
@@ -18,9 +18,19 @@ from torchvision import models #type:ignore
 import torch.nn as nn #type:ignore
 
 def load_xray_model():
+    # 1. Initialize standard ResNet18
     model = models.resnet18()
-    model.fc = nn.Linear(model.fc.in_features, 11) # 11 classes for OrganAMNIST
-    model.load_state_dict(torch.load('models/universal_xray_body.pth', map_location=torch.device('cpu')))
+    
+    # 2. FIX: Change the first convolutional layer to accept 1 channel (Grayscale)
+    # instead of the default 3 channels (RGB)
+    model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+    
+    # 3. Change the final layer to match your 11 classes
+    model.fc = nn.Linear(model.fc.in_features, 11) 
+    
+    # 4. Now load the weights—the shapes will match!
+    model.load_state_dict(torch.load('Backend/models/universal_xray_body.pth', map_location=torch.device('cpu')))
+    
     model.eval()
     return model
 

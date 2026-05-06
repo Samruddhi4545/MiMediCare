@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Form #type:ignore
-from .ai_logic import predict_medicine, predict_xray_part #type:ignore
+from .logic import predict_medicine, predict_xray_part #type:ignore
 import sqlite3
 import math
 
@@ -7,7 +7,7 @@ app = FastAPI()
 
 # Helper for GPS Distance (as we discussed)
 def get_nearest_doctors(lat, lon, specialty):
-    conn = sqlite3.connect('../Database/doctors.db')
+    conn = sqlite3.connect('Database/doctors.db')
     cursor = conn.cursor()
     cursor.execute("SELECT name, specialty, lat, lon, address FROM doctors WHERE specialty=?", (specialty,))
     docs = cursor.fetchall()
