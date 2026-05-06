@@ -13,3 +13,7 @@ scikit-learn>=1.4.0   #scientific kit learning for machine learning
 
 # Environment & Security
 python-dotenv>=1.0.0  # environment setup 
+ultralytics
+torch
+torchvision
+tensorflow
