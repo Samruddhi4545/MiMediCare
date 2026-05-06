@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 2
+names: ['IBUPROFEN AND PARACETAMOL TABLETS', 'Medicine-Name']
+
+roboflow:
+  workspace: medicine-label
+  project: medicine-crimp
+  version: 1
+  license: Public Domain
+  url: https://universe.roboflow.com/medicine-label/medicine-crimp/dataset/1
