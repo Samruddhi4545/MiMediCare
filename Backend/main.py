@@ -1,34 +1,33 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException #type:ignore
+from fastapi.middleware.cors import CORSMiddleware #type:ignore
 from pydantic import BaseModel
 import sqlite3
 import math
 import requests
 import numpy as np
-import cv2
-import easyocr
+import cv2 #type:ignore
+import easyocr #type:ignore
+import os
+
+# Import your trained logic from logic.py
+try:
+    from .logic import predict_medicine, predict_xray_part, predict_symptoms_ai
+except ImportError:
+    # Fallback if running as a standalone script for testing
+    from logic import predict_medicine, predict_xray_part, predict_symptoms_ai
 
 # ---------------- EASYOCR (OFFLINE MODE) ----------------
+# Using your specific path for local models
 reader = easyocr.Reader(
     ['en'],
     model_storage_directory=r"C:\Users\Samruddhi pai\.EasyOCR\model",
     download_enabled=False
 )
 
-# ---------------- AI MODEL PLACEHOLDER ----------------
-try:
-    from .logic import predict_medicine, predict_xray_part  # type: ignore
-except:
-    def predict_medicine(image_bytes):
-        return "UNKNOWN"
+app = FastAPI(title="MiMediCare AI Backend")
 
-    def predict_xray_part(image_bytes):
-        return "Lung-Right"
-
-# ---------------- FASTAPI ----------------
-app = FastAPI()
-
-# ---------------- CORS ----------------
+# ---------------- CORS CONFIGURATION ----------------
+# Allows your React App (localhost:3000) to talk to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -37,7 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- MODELS ----------------
+# ---------------- DATA MODELS ----------------
 class SymptomInput(BaseModel):
     text: str
 
@@ -45,63 +44,23 @@ class LocationInput(BaseModel):
     lat: float
     lon: float
 
-# ---------------- OCR FUNCTION ----------------
+# ---------------- HELPER FUNCTIONS ----------------
+
 def extract_text_from_image(image_bytes):
+    """Uses EasyOCR to detect medicine names on packaging."""
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         result = reader.readtext(img)
         return " ".join([res[1] for res in result]).upper()
-    except:
+    except Exception:
         return ""
 
-# ---------------- MEDICINE DATABASE ----------------
-MED_DB = {
-    "DOLO 650": {
-        "title": "Dolo 650",
-        "manufacturer": "Micro Labs Ltd.",
-        "composition": "Paracetamol 650 mg",
-        "usage_intro": "Used for fever and pain relief",
-        "uses_list": ["Fever", "Headache", "Body pain"]
-    },
-    "PARACETAMOL": {
-        "title": "Paracetamol",
-        "manufacturer": "Generic",
-        "composition": "Paracetamol",
-        "usage_intro": "Pain reliever",
-        "uses_list": ["Fever", "Pain"]
-    },
-    "IBUPROFEN": {
-        "title": "Ibuprofen",
-        "manufacturer": "Generic",
-        "composition": "Ibuprofen",
-        "usage_intro": "Anti-inflammatory",
-        "uses_list": ["Pain", "Inflammation"]
-    }
-}
-
-# ---------------- OPENFDA API ----------------
-def fetch_drug_info(name):
-    try:
-        url = f"https://api.fda.gov/drug/label.json?search={name}&limit=1"
-        res = requests.get(url)
-        if res.status_code == 200:
-            data = res.json()["results"][0]
-            return {
-                "title": data.get("openfda", {}).get("brand_name", ["Unknown"])[0],
-                "manufacturer": data.get("openfda", {}).get("manufacturer_name", ["Unknown"])[0],
-                "composition": "See official label",
-                "usage_intro": data.get("indications_and_usage", ["Not available"])[0],
-                "uses_list": data.get("purpose", ["General use"])
-            }
-    except:
-        pass
-    return None
-
-# ---------------- DOCTOR SEARCH ----------------
 def get_nearby_doctors(lat, lon, specialty=None):
+    """Queries your local SQLite database for doctors within 15km."""
     try:
-        conn = sqlite3.connect("Database/doctors.db")
+        db_path = os.path.join("Database", "doctors.db")
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
         if specialty:
@@ -114,6 +73,7 @@ def get_nearby_doctors(lat, lon, specialty=None):
 
         results = []
         for d in docs:
+            # Haversine-lite distance calculation
             dist = math.sqrt((lat - d[2])**2 + (lon - d[3])**2) * 111
             if dist < 15:
                 results.append({
@@ -124,55 +84,30 @@ def get_nearby_doctors(lat, lon, specialty=None):
                 })
 
         return sorted(results, key=lambda x: x["distance"])
-    except:
+    except Exception:
         return []
 
 # =====================================================
-# ✅ FEATURE 1: SMART MEDICINE IDENTIFICATION
+# ✅ FEATURE 1: MEDICINE SCANNER (AI + OCR)
 # =====================================================
 @app.post("/identify-pill")
 async def identify_pill(file: UploadFile = File(...)):
-
     image_bytes = await file.read()
-
+    
+    # 1. OCR Detection
     extracted_text = extract_text_from_image(image_bytes)
+    # 2. AI Model Detection (Notebook #02)
     ai_prediction = predict_medicine(image_bytes)
 
-    combined = (extracted_text + " " + str(ai_prediction)).upper()
-
-    for key in MED_DB:
-        if key in combined:
-            return {
-                "source": "local_db",
-                "detected_text": extracted_text,
-                "ai_prediction": ai_prediction,
-                "details": MED_DB[key]
-            }
-
-    api_data = fetch_drug_info(combined)
-    if api_data:
-        return {
-            "source": "openfda",
-            "detected_text": extracted_text,
-            "ai_prediction": ai_prediction,
-            "details": api_data
-        }
-
     return {
-        "source": "unknown",
+        "status": "success",
         "detected_text": extracted_text,
         "ai_prediction": ai_prediction,
-        "details": {
-            "title": combined,
-            "manufacturer": "Unknown",
-            "composition": "Unknown",
-            "usage_intro": "Consult pharmacist",
-            "uses_list": ["Verification required"]
-        }
+        "instructions": "Verify with the physical label before consumption."
     }
 
 # =====================================================
-# ✅ FEATURE 2: XRAY ANALYSIS (WITH CONDITION)
+# ✅ FEATURE 2: X-RAY ANALYSIS & EXPLANATION
 # =====================================================
 @app.post("/analyze-xray")
 async def analyze_xray(
@@ -180,114 +115,101 @@ async def analyze_xray(
     user_lon: float = Form(...),
     file: UploadFile = File(...)
 ):
-
     image_bytes = await file.read()
-    result = predict_xray_part(image_bytes)
+    
+    # Calls your ResNet-18 model from logic.py
+    detected_part, explanation = predict_xray_part(image_bytes)
 
-    diagnostic_models = {
-
-        "Lung-Right": {
-            "condition": "Right Lung Abnormality Detected",
-            "explanation": "Possible infection or inflammation in right lung region.",
-            "specialist": "Pulmonologist"
-        },
-
-        "Lung-Left": {
-            "condition": "Left Lung Abnormality Detected",
-            "explanation": "Density variation observed in left lung.",
-            "specialist": "Pulmonologist"
-        },
-
-        "Chest-Clear": {
-            "condition": "Normal Chest X-ray",
-            "explanation": "No visible abnormality detected.",
-            "specialist": "General Physician"
-        },
-
-        "Bone-Fracture": {
-            "condition": "Bone Fracture Detected",
-            "explanation": "Discontinuity in bone structure.",
-            "specialist": "Orthopedic Surgeon"
-        }
+    # Map organ to specialty for doctor search
+    specialty_map = {
+        "Heart": "Cardiologist",
+        "Lung-Left": "Pulmonologist",
+        "Lung-Right": "Pulmonologist",
+        "Spleen": "General Surgeon",
+        "Pancreas": "Gastroenterologist"
     }
-
-    report = diagnostic_models.get(
-        result,
-        {
-            "condition": f"Analysis of {result}",
-            "explanation": "No mapping available.",
-            "specialist": "General Physician"
-        }
-    )
-
-    doctors = get_nearby_doctors(user_lat, user_lon, report["specialist"])
+    
+    target_specialty = specialty_map.get(detected_part, "General Physician")
+    doctors = get_nearby_doctors(user_lat, user_lon, target_specialty)
 
     return {
-        "detected_part": result,
-        **report,
+        "detected_part": detected_part,
+        "explanation": explanation,
+        "recommended_specialist": target_specialty,
         "nearby_doctors": doctors
     }
 
 # =====================================================
-# ✅ FEATURE 3: SYMPTOM CHECKER
+# ✅ FEATURE 3: SYMPTOM CHECKER (AI-DRIVEN)
 # =====================================================
 @app.post("/predict-symptoms")
 async def predict_symptoms(data: SymptomInput):
-
-    text = data.text.lower()
-
-    disease_db = {
-        "Common Cold": ["cough", "sneezing", "runny nose", "mild fever"],
-        "Flu": ["fever", "body pain", "chills", "fatigue"],
-        "COVID-19": ["fever", "cough", "loss of taste", "breath"],
-        "Allergy": ["rash", "itching", "sneezing"],
-        "Malaria": ["fever", "chills", "sweating"],
-        "Typhoid": ["fever", "weakness", "abdominal pain"],
-        "Pneumonia": ["cough", "fever", "breathing", "chest pain"]
-    }
-
-    scores = {}
-
-    # Count matching symptoms
-    for disease, symptoms in disease_db.items():
-        match_count = sum(1 for s in symptoms if s in text)
-        if match_count > 0:
-            scores[disease] = match_count
-
-    if not scores:
-        return {
-            "prediction": "No symptoms detected. Please describe symptoms like fever, cough, pain, etc."
-        }
-
-    # Sort diseases by highest match
-    sorted_diseases = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-
-    # Top predictions
-    result = []
-    for disease, score in sorted_diseases[:3]:
-        result.append({
-            "disease": disease,
-            "confidence": f"{round((score/5)*100, 1)}%"
-        })
-
+    # Calls your TF-IDF + Random Forest model from logic.py
+    disease, explanation = predict_symptoms_ai(data.text)
+    
     return {
-        "prediction": result
+        "prediction": disease,
+        "explanation": explanation,
+        "disclaimer": "AI prediction only. Please seek professional medical advice."
     }
 
 # =====================================================
 # ✅ FEATURE 4: DOCTOR LOCATOR
 # =====================================================
+
+import os
+import sqlite3
+import math
+
+def get_nearby_doctors(lat, lon, specialty=None):
+    try:
+        # Get the path of main.py
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        
+        # JUMP: Go out of 'Backend' and into 'Database'
+        # The '..' tells Python to go up one level
+        db_path = os.path.join(BASE_DIR, "..", "Database", "doctors.db")
+        
+        if not os.path.exists(db_path):
+            print(f"CRITICAL ERROR: Database not found at {db_path}")
+            return []
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        if specialty:
+            cursor.execute("SELECT name, specialty, lat, lon, address FROM doctors WHERE specialty=?", (specialty,))
+        else:
+            cursor.execute("SELECT name, specialty, lat, lon, address FROM doctors")
+
+        docs = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for d in docs:
+            # Haversine distance calculation (simplified for local use)
+            dist = math.sqrt((lat - d[2])**2 + (lon - d[3])**2) * 111
+            
+            # Increase this to 500 if you are testing Mangaluru doctors from Bengaluru!
+            if dist < 50: 
+                results.append({
+                    "name": d[0],
+                    "specialty": d[1],
+                    "address": d[4],
+                    "distance": round(dist, 2)
+                })
+
+        return sorted(results, key=lambda x: x["distance"])
+    except Exception as e:
+        print(f"Database Error: {e}")
+        return []
 @app.post("/find-nearby-doctors")
 async def find_nearby_doctors(loc: LocationInput):
-
     doctors = get_nearby_doctors(loc.lat, loc.lon)
-
     if not doctors:
-        raise HTTPException(status_code=404, detail="No doctors found")
-
+        raise HTTPException(status_code=404, detail="No doctors found in your area.")
     return {"nearby_facilities": doctors}
 
-# ---------------- ROOT ----------------
 @app.get("/")
 async def root():
-    return {"message": "MiMediCare API Running"}
+    return {"message": "MiMediCare API is Online"}
