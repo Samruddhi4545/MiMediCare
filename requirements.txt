@@ -17,3 +17,5 @@ ultralytics
 torch
 torchvision
 tensorflow
+easyocr
+requests
